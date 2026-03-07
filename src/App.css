@@ -20,4 +20,7 @@
   font-size: 0.95rem;
   color: var(--grey-mid);
   margin: 0;
+  max-width: 32rem;
+  margin-inline: auto;
 }
+
