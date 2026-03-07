@@ -43,6 +43,7 @@ export function ChatbotView() {
   const [input, setInput] = useState('')
   const [answers, setAnswers] = useState({})
   const [finished, setFinished] = useState(false)
+   const [eegFile, setEegFile] = useState(null)
 
   const handleReset = () => {
     setMessages(initialMessages)
@@ -142,6 +143,21 @@ export function ChatbotView() {
     }
   }
 
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0]
+    setEegFile(file || null)
+  }
+
+  const handleDrop = (event) => {
+    event.preventDefault()
+    const file = event.dataTransfer.files?.[0]
+    if (file) setEegFile(file)
+  }
+
+  const handleDragOver = (event) => {
+    event.preventDefault()
+  }
+
   return (
     <main className="chatbot-view">
       <section className="chat-card">
@@ -189,34 +205,69 @@ export function ChatbotView() {
         </form>
       </section>
 
-      {summary && (
-        <section className="summary-card">
-          <h3>Your snapshot (fake for now)</h3>
-          <p className="summary-main">
-            {summary.moodScore != null ? (
-              <>
-                Based on this quick chat, your mood lands around{' '}
-                <span className="summary-highlight">{summary.moodScore}/10</span>, which points to{' '}
-                <span className="summary-highlight">{summary.wellbeingLevel}</span>.
-              </>
-            ) : (
-              <>Thanks for walking through this with me — I’ve got a rough picture of where you’re at.</>
-            )}
-          </p>
-          {summary.emotionWord && (
-            <p className="summary-secondary">
-              The emotion word you used was{' '}
-              <span className="summary-highlight">“{summary.emotionWord}”</span>.
+      <section className="side-panel">
+        {summary && (
+          <section className="summary-card">
+            <h3>Your snapshot (fake for now)</h3>
+            <p className="summary-main">
+              {summary.moodScore != null ? (
+                <>
+                  Based on this quick chat, your mood lands around{' '}
+                  <span className="summary-highlight">{summary.moodScore}/10</span>, which points to{' '}
+                  <span className="summary-highlight">{summary.wellbeingLevel}</span>.
+                </>
+              ) : (
+                <>Thanks for walking through this with me — I’ve got a rough picture of where you’re at.</>
+              )}
             </p>
-          )}
-          <p className="summary-footnote">
-            Hook this up to your sentiment models or EEG pipeline to turn this into a real dashboard.
+            {summary.emotionWord && (
+              <p className="summary-secondary">
+                The emotion word you used was{' '}
+                <span className="summary-highlight">“{summary.emotionWord}”</span>.
+              </p>
+            )}
+            <p className="summary-footnote">
+              Hook this up to your sentiment models or EEG pipeline to turn this into a real dashboard.
+            </p>
+            <button type="button" className="btn btn-ghost summary-reset" onClick={handleReset}>
+              Start a new check‑in
+            </button>
+          </section>
+        )}
+
+        <section
+          className={`eeg-card ${eegFile ? 'eeg-card-has-file' : ''}`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
+          <h3>EEG upload (for your pipeline)</h3>
+          <p className="eeg-desc">
+            Drop a file here or browse to select one. This doesn’t process anything yet – it’s a
+            front‑end hook so you can wire in your own EEG analysis.
           </p>
-          <button type="button" className="btn btn-ghost summary-reset" onClick={handleReset}>
-            Start a new check‑in
-          </button>
+          <label className="eeg-dropzone">
+            <input
+              type="file"
+              className="eeg-input"
+              accept=".edf,.bdf,.csv,.mat,.fif,.txt,.json,application/octet-stream"
+              onChange={handleFileChange}
+            />
+            <span className="eeg-dropzone-text">
+              {eegFile ? (
+                <>
+                  <span className="eeg-file-name">{eegFile.name}</span>
+                </>
+              ) : (
+                <>Drop EEG file or click to choose</>
+              )}
+            </span>
+          </label>
+          <p className="eeg-hint">
+            Once your backend is ready, grab this file from the input change handler and send it to
+            your API.
+          </p>
         </section>
-      )}
+      </section>
     </main>
   )
 }

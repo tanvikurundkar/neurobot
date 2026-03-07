@@ -168,6 +168,72 @@
   font-size: 0.85rem;
 }
 
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.eeg-card {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 14px;
+  padding: 1rem 1.15rem 1.15rem;
+  border: 1px dashed var(--blue-light);
+  box-shadow: 0 3px 14px var(--shadow);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.eeg-card-has-file {
+  border-style: solid;
+  border-color: var(--blue-mid);
+  background: var(--blue-pale);
+}
+
+.eeg-card h3 {
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.eeg-desc {
+  font-size: 0.82rem;
+  color: var(--grey-mid);
+  margin: 0 0 0.6rem;
+}
+
+.eeg-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  background: var(--white);
+  border: 1px dashed var(--blue-light);
+  cursor: pointer;
+  margin-bottom: 0.4rem;
+}
+
+.eeg-input {
+  display: none;
+}
+
+.eeg-dropzone-text {
+  font-size: 0.86rem;
+  color: var(--grey-mid);
+}
+
+.eeg-file-name {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--blue-deep);
+  word-break: break-all;
+}
+
+.eeg-hint {
+  font-size: 0.78rem;
+  color: var(--grey-soft);
+  margin: 0;
+}
+
 @media (min-width: 720px) {
   .chatbot-view {
     flex-direction: row;
@@ -178,7 +244,7 @@
     flex: 3;
   }
 
-  .summary-card {
+  .side-panel {
     flex: 2;
     margin-top: 0;
   }

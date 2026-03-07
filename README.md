@@ -7,6 +7,7 @@ Mental health chatbot-style frontend for a mental health dashboard. Right now it
 - **Chatbot** — Neurobot asks a short sequence of questions about mood, emotion word, energy, sleep, and stressors.
 - **Chat UI** — Blue/grey, Bree Serif + Verdana, chat bubbles for bot/user.
 - **Summary card** — Simple, fake summary based on replies (e.g. mood around X/10) to be replaced with real models later.
+- **EEG upload section** — Drag/drop or browse for an EEG file; front-end only so you can attach your own analysis pipeline.
 
 ### Run locally
 
