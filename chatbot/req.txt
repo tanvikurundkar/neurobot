@@ -1,0 +1,16 @@
+langchain>=0.2.0
+langchain-openai>=0.1.0
+langchain-pinecone>=0.1.0
+langchain-community>=0.2.0
+pinecone-client>=3.0.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# Optional — for Google Drive ingestion
+google-api-python-client>=2.0.0
+google-auth>=2.0.0
+pypdf>=4.0.0
+
+# Optional — for REST API server
+fastapi>=0.110.0
+uvicorn>=0.29.0
