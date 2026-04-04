@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from .eeg_features import features_from_buffer
+from .eeg_features import band_power_breakdown, downsample_for_plot, features_from_buffer
 
 try:
     from pylsl import StreamInlet, resolve_byprop
@@ -78,6 +78,8 @@ class LSLWorker:
                     "channels": None,
                     "emotion": None,
                     "goleman": None,
+                    "muse_lsl": None,
+                    "waveform": None,
                     "model_loaded": self._emotion_model is not None,
                 }
             )
@@ -102,6 +104,8 @@ class LSLWorker:
                                 "channels": None,
                                 "emotion": None,
                                 "goleman": None,
+                                "muse_lsl": None,
+                                "waveform": None,
                                 "model_loaded": self._emotion_model is not None,
                             }
                         )
@@ -123,6 +127,8 @@ class LSLWorker:
                             "channels": None,
                             "emotion": None,
                             "goleman": None,
+                            "muse_lsl": None,
+                            "waveform": None,
                             "model_loaded": self._emotion_model is not None,
                         }
                     )
@@ -148,6 +154,8 @@ class LSLWorker:
                         "channels": n_ch,
                         "emotion": None,
                         "goleman": None,
+                        "muse_lsl": None,
+                        "waveform": None,
                         "model_loaded": self._emotion_model is not None,
                     }
                 )
@@ -165,6 +173,8 @@ class LSLWorker:
                         "channels": n_ch,
                         "emotion": None,
                         "goleman": None,
+                        "muse_lsl": None,
+                        "waveform": None,
                         "model_loaded": self._emotion_model is not None,
                     }
                 )
@@ -179,6 +189,14 @@ class LSLWorker:
                 data = np.vstack([data, pad])
 
             feat = features_from_buffer(data, sfreq)
+            try:
+                muse_lsl = band_power_breakdown(data, sfreq)
+            except Exception:
+                muse_lsl = None
+            try:
+                waveform = downsample_for_plot(data, max_points=160)
+            except Exception:
+                waveform = None
             emotion_payload: Optional[Dict[str, Any]] = None
             goleman_payload: Optional[Dict[str, Any]] = None
             if self._emotion_model is not None:
@@ -203,6 +221,8 @@ class LSLWorker:
                     "channels": n_ch,
                     "emotion": emotion_payload,
                     "goleman": goleman_payload,
+                    "muse_lsl": muse_lsl,
+                    "waveform": waveform,
                     "model_loaded": self._emotion_model is not None,
                 }
             )

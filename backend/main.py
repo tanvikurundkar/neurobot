@@ -13,10 +13,12 @@ import json
 import threading
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from .lsl_worker import LSLWorker
+from .rag_bridge import get_rag_chat
 
 app = FastAPI(title="Neurobot EEG (LSL)")
 
@@ -36,6 +38,8 @@ _snapshot: Dict[str, Any] = {
     "channels": None,
     "emotion": None,
     "goleman": None,
+    "muse_lsl": None,
+    "waveform": None,
     "model_loaded": False,
 }
 _snapshot_lock = threading.Lock()
@@ -64,6 +68,27 @@ def health() -> Dict[str, str]:
 def eeg_status() -> Dict[str, Any]:
     with _snapshot_lock:
         return dict(_snapshot)
+
+
+class ChatBody(BaseModel):
+    message: str = Field(..., min_length=1, max_length=8000)
+    session_id: str = "default"
+
+
+@app.post("/chat")
+def neurobot_rag_chat(body: ChatBody) -> Dict[str, str]:
+    """OpenAI + Pinecone RAG therapist bot (same logic as chatbot/chatbot.py)."""
+    chat_fn, err = get_rag_chat()
+    if chat_fn is None:
+        raise HTTPException(
+            status_code=503,
+            detail=err or "RAG chat unavailable. pip install -r chatbot/req.txt and configure API keys.",
+        )
+    try:
+        reply = chat_fn(body.message.strip())
+        return {"reply": reply}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.websocket("/ws/eeg")

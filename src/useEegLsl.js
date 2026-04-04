@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 function defaultWsUrl() {
   if (import.meta.env.VITE_EEG_WS_URL) return import.meta.env.VITE_EEG_WS_URL
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    return `${proto}://${window.location.host}/ws-eeg`
+  }
   const host = import.meta.env.VITE_EEG_HOST || '127.0.0.1:8000'
   const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${host}/ws/eeg`

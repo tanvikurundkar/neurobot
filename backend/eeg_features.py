@@ -15,6 +15,10 @@ BANDS = (
     (30.0, 45.0), # gamma
 )
 
+BAND_NAMES = ("delta", "theta", "alpha", "beta", "gamma")
+# Default Muse 2016 channel order when using Muse Lab → LSL
+MUSE_CHANNEL_NAMES = ("TP9", "AF7", "AF8", "TP10")
+
 
 def bandpower_1d(sig: np.ndarray, sfreq: float, fmin: float, fmax: float) -> float:
     """Log-scaled band power for one channel (Welch-like via rFFT + Hann)."""
@@ -28,6 +32,38 @@ def bandpower_1d(sig: np.ndarray, sfreq: float, fmin: float, fmax: float) -> flo
     mask = (freqs >= fmin) & (freqs < fmax)
     p = float(np.sum(psd[mask]))
     return float(np.log1p(p))
+
+
+def band_power_breakdown(data: np.ndarray, sfreq: float) -> dict:
+    """
+    Human-readable band powers for UI (Muse LSL / muselsl-style stats).
+    data: (n_channels, n_samples)
+    """
+    if data.ndim != 2:
+        raise ValueError("data must be 2D (channels, samples)")
+    n_ch, _ = data.shape
+    n_use = min(4, n_ch)
+    channels_out = []
+    for c in range(n_use):
+        sig = data[c].astype(np.float64, copy=False)
+        name = MUSE_CHANNEL_NAMES[c] if c < len(MUSE_CHANNEL_NAMES) else f"ch{c + 1}"
+        bands_dict = {
+            BAND_NAMES[i]: round(bandpower_1d(sig, sfreq, BANDS[i][0], BANDS[i][1]), 4)
+            for i in range(len(BANDS))
+        }
+        channels_out.append({"name": name, "bands": bands_dict})
+    return {"channels": channels_out, "band_names": list(BAND_NAMES)}
+
+
+def downsample_for_plot(data: np.ndarray, max_points: int = 160) -> list[list[float]]:
+    """Shape (n_ch, n_samp) → list of channels, each list of max_points amplitudes (µV-scale float)."""
+    if data.size == 0:
+        return []
+    n_ch, n = data.shape
+    if n <= max_points:
+        return np.asarray(data, dtype=float).tolist()
+    idx = np.linspace(0, n - 1, max_points, dtype=int)
+    return data[:, idx].astype(float).tolist()
 
 
 def features_from_buffer(data: np.ndarray, sfreq: float) -> np.ndarray:

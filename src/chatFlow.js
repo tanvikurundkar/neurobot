@@ -46,6 +46,11 @@ export function isHappyMood(score) {
   return score != null && score >= 8
 }
 
+/** Mood 1–7 → support path; live EEG emphasis + optional RAG after check-in. */
+export function isSupportPathMood(score) {
+  return score != null && score >= 1 && score < 8
+}
+
 export function happyClosing(score) {
   return `That’s wonderful to hear${score != null ? ` (${score}/10)` : ''}. Keep smiling, enjoy what you’re doing, and ride that energy. I’ll leave you here — come back anytime you want a longer check‑in.`
 }
