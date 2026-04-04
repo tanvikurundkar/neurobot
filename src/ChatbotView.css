@@ -1,3 +1,43 @@
+.btn {
+  padding: 0.65rem 1.1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border: none;
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--blue-mid);
+  color: var(--white);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: var(--blue-deep);
+  box-shadow: 0 4px 14px var(--shadow);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--blue-mid);
+  border: 1px solid var(--blue-light);
+}
+
+.btn-ghost:hover {
+  background: var(--blue-pale);
+}
+
+.bubble-strategy {
+  border-left: 3px solid var(--blue-soft);
+  font-size: 0.88rem;
+  color: var(--grey-mid);
+}
+
 .chatbot-view {
   display: flex;
   flex-direction: column;
@@ -232,6 +272,63 @@
   font-size: 0.78rem;
   color: var(--grey-soft);
   margin: 0;
+}
+
+.eeg-live {
+  border-style: solid;
+  border-color: var(--blue-light);
+}
+
+.eeg-actions {
+  margin-bottom: 0.65rem;
+}
+
+.eeg-connect-btn {
+  width: 100%;
+}
+
+.eeg-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  margin: 0 0 0.5rem;
+}
+
+.eeg-stats dt {
+  color: var(--grey-soft);
+  margin: 0;
+}
+
+.eeg-stats dd {
+  margin: 0;
+  font-weight: 600;
+  color: var(--blue-deep);
+}
+
+.eeg-emotion,
+.eeg-goleman {
+  font-size: 0.82rem;
+  margin: 0.35rem 0 0;
+  color: var(--grey-dark);
+}
+
+.eeg-conf {
+  color: var(--grey-soft);
+  font-weight: 500;
+}
+
+.eeg-error {
+  font-size: 0.8rem;
+  color: #c53030;
+  margin: 0.35rem 0 0;
+}
+
+.eeg-hint code {
+  font-size: 0.72rem;
+  background: var(--grey-pale);
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
 }
 
 @media (min-width: 720px) {
