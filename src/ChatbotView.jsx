@@ -1,161 +1,233 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  COPING_STRATEGIES,
+  INTRO_TEXT,
+  QUESTIONS,
+  happyClosing,
+  isHappyMood,
+  isSupportPathMood,
+  parseMood1to10,
+  supportClosing,
+} from './chatFlow'
+import { EegMuseLslStats } from './EegMuseLslStats'
+import { EegWaveform } from './EegWaveform'
+import { ragChatUrl } from './apiBase'
+import { getGolemanInterpretation } from './golemanInterpretation'
+import { useEegLsl } from './useEegLsl'
 import './ChatbotView.css'
 
-const STEPS = [
-  {
-    id: 'overall_mood',
-    question: 'Over the last few days, how would you rate your overall mood from 1–10?',
-  },
-  {
-    id: 'emotion_word',
-    question: 'If you had to pick one word for how you feel right now (e.g. calm, anxious, hopeful), what would it be?',
-  },
-  {
-    id: 'energy',
-    question: 'How has your energy level been lately?',
-  },
-  {
-    id: 'sleep',
-    question: 'How have you been sleeping?',
-  },
-  {
-    id: 'stress',
-    question: 'What’s been stressing you out the most, if anything?',
-  },
+const initialMessages = () => [
+  { id: 'intro', from: 'bot', text: INTRO_TEXT },
+  { id: 'q-overall_mood', from: 'bot', text: QUESTIONS.overall_mood },
 ]
 
-const initialMessages = [
-  {
-    id: 'intro-1',
-    from: 'bot',
-    text: "Hey, I'm Neurobot. I’m here to gently check in on how you’ve been feeling.",
-  },
-  {
-    id: 'intro-2',
-    from: 'bot',
-    text: STEPS[0].question,
-  },
-]
+/** After each answer, which question comes next (support path). */
+const NEXT = {
+  overall_mood: 'emotion_word',
+  emotion_word: 'energy',
+  energy: 'sleep',
+  sleep: 'stress',
+  stress: null,
+}
+
+/** Strategy index after completing each step (before showing next question). */
+const strategyIndexAfter = {
+  overall_mood: 0,
+  emotion_word: 1,
+  energy: 2,
+  sleep: 3,
+}
+
+const RAG_HANDOFF =
+  'If you want to keep talking, ask anything below. I answer from the NeuroBot knowledge base (OpenAI RAG over your Pinecone docs) — not as a substitute for professional care.'
 
 export function ChatbotView() {
   const [messages, setMessages] = useState(initialMessages)
-  const [stepIndex, setStepIndex] = useState(0)
+  const [awaiting, setAwaiting] = useState('overall_mood')
   const [input, setInput] = useState('')
   const [answers, setAnswers] = useState({})
   const [finished, setFinished] = useState(false)
-   const [eegFile, setEegFile] = useState(null)
+  const [chatPhase, setChatPhase] = useState('checkin')
+  const [ragLoading, setRagLoading] = useState(false)
+
+  const { snapshot, wsConnected, connect, disconnect } = useEegLsl()
+  const autoEegRef = useRef(false)
+
+  const supportPath = useMemo(() => {
+    const s = parseMood1to10(answers.overall_mood ?? '')
+    return isSupportPathMood(s)
+  }, [answers.overall_mood])
+
+  const golemanSide = useMemo(() => getGolemanInterpretation(snapshot?.goleman), [snapshot?.goleman])
+
+  useEffect(() => {
+    if (!supportPath) return
+    if (autoEegRef.current) return
+    autoEegRef.current = true
+    connect()
+  }, [supportPath, connect])
 
   const handleReset = () => {
-    setMessages(initialMessages)
-    setStepIndex(0)
+    autoEegRef.current = false
+    disconnect()
+    setMessages(initialMessages())
+    setAwaiting('overall_mood')
     setInput('')
     setAnswers({})
     setFinished(false)
+    setChatPhase('checkin')
+    setRagLoading(false)
   }
 
   const summary = useMemo(() => {
     if (!finished) return null
     const moodRaw = answers.overall_mood
-    const moodScore = Number.parseInt(moodRaw, 10)
-    const clampedScore = Number.isNaN(moodScore)
-      ? null
-      : Math.min(10, Math.max(1, moodScore))
-
-    let wellbeingLevel = 'balanced'
-    if (clampedScore != null) {
-      if (clampedScore >= 8) wellbeingLevel = 'feeling mostly steady'
-      else if (clampedScore >= 5) wellbeingLevel = 'in a mixed, in‑between place'
-      else wellbeingLevel = 'feeling a bit low'
-    }
-
-    const emotionWord = answers.emotion_word
-
+    const moodScore = parseMood1to10(moodRaw ?? '')
     return {
-      moodScore: clampedScore,
-      wellbeingLevel,
-      emotionWord,
+      moodScore,
+      emotionWord: answers.emotion_word,
     }
   }, [answers, finished])
 
-  const handleSend = (evt) => {
+  const sendRagMessage = async (text) => {
+    setRagLoading(true)
+    try {
+      const res = await fetch(ragChatUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const d = data.detail
+        const detail = Array.isArray(d)
+          ? d.map((x) => (x && typeof x === 'object' && x.msg ? x.msg : JSON.stringify(x))).join('; ')
+          : typeof d === 'string'
+            ? d
+            : JSON.stringify(d ?? data)
+        throw new Error(detail || res.statusText)
+      }
+      setMessages((prev) => [
+        ...prev,
+        { id: `rag-bot-${Date.now()}`, from: 'bot', variant: 'rag', text: data.reply ?? '' },
+      ])
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `rag-err-${Date.now()}`,
+          from: 'bot',
+          variant: 'error',
+          text: `Could not reach NeuroBot RAG: ${e.message}. Install chatbot deps and keys, or run the backend on port 8000.`,
+        },
+      ])
+    } finally {
+      setRagLoading(false)
+    }
+  }
+
+  const handleSend = async (evt) => {
     evt?.preventDefault()
-    if (!input.trim() || finished) return
-
     const text = input.trim()
-    const currentStep = STEPS[stepIndex]
-    const nextStepIndex = stepIndex + 1
+    if (!text || ragLoading) return
 
-    const updatedAnswers = {
-      ...answers,
-      [currentStep.id]: text,
+    if (chatPhase === 'rag') {
+      setInput('')
+      setMessages((prev) => [...prev, { id: `rag-user-${Date.now()}`, from: 'user', text }])
+      await sendRagMessage(text)
+      return
     }
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `user-${Date.now()}`,
-        from: 'user',
-        text,
-      },
-    ])
-    setAnswers(updatedAnswers)
+    if (finished) return
+
+    const userMsg = { id: `user-${Date.now()}`, from: 'user', text }
     setInput('')
 
-    if (nextStepIndex < STEPS.length) {
-      const nextStep = STEPS[nextStepIndex]
+    setMessages((prev) => [...prev, userMsg])
+
+    const merged = { ...answers, [awaiting]: text }
+    setAnswers(merged)
+
+    if (awaiting === 'overall_mood') {
+      const score = parseMood1to10(text)
+      if (isHappyMood(score)) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `bot-happy-${Date.now()}`,
+            from: 'bot',
+            text: happyClosing(score),
+          },
+        ])
+        setFinished(true)
+        setChatPhase('done')
+        return
+      }
+
+      const si = strategyIndexAfter.overall_mood
+      const strat = COPING_STRATEGIES[si] ?? COPING_STRATEGIES[0]
+      const nextKey = NEXT.overall_mood
       setMessages((prev) => [
         ...prev,
         {
-          id: `bot-${nextStep.id}`,
+          id: `strategy-${si}`,
           from: 'bot',
-          text: nextStep.question,
+          variant: 'strategy',
+          text: strat,
         },
-      ])
-      setStepIndex(nextStepIndex)
-    } else {
-      const moodRaw = updatedAnswers.overall_mood
-      const moodScore = Number.parseInt(moodRaw, 10)
-      const clampedScore = Number.isNaN(moodScore)
-        ? null
-        : Math.min(10, Math.max(1, moodScore))
-
-      const emotionWord = updatedAnswers.emotion_word
-
-      const closing = [
-        "Thank you for sharing all of that with me.",
-        clampedScore != null
-          ? `From what you’ve shared, it sounds like your mood has been around ${clampedScore}/10 and you’ve been feeling "${emotionWord || 'how you described'}".`
-          : `From what you’ve shared, I’m getting a picture of how things have been feeling for you emotionally.`,
-        'This is just a placeholder check‑in — when you plug in real models, this conversation can power a richer mental health dashboard.',
-      ]
-        .filter(Boolean)
-        .join(' ')
-
-      setMessages((prev) => [
-        ...prev,
         {
-          id: 'bot-summary',
+          id: `q-${nextKey}`,
           from: 'bot',
-          text: closing,
+          text: QUESTIONS[nextKey],
         },
       ])
-      setFinished(true)
+      setAwaiting(nextKey)
+      return
     }
-  }
 
-  const handleFileChange = (event) => {
-    const file = event.target.files?.[0]
-    setEegFile(file || null)
-  }
+    if (awaiting === 'stress') {
+      const closeId = `bot-close-${Date.now()}`
+      const ragIntroId = `rag-intro-${Date.now()}`
+      const score = parseMood1to10(merged.overall_mood ?? '')
+      setMessages((prev) => {
+        const tail = [
+          {
+            id: closeId,
+            from: 'bot',
+            text: supportClosing(merged),
+          },
+        ]
+        if (isSupportPathMood(score)) {
+          tail.push({ id: ragIntroId, from: 'bot', variant: 'rag', text: RAG_HANDOFF })
+        }
+        return [...prev, ...tail]
+      })
+      setFinished(true)
+      setChatPhase(isSupportPathMood(score) ? 'rag' : 'done')
+      return
+    }
 
-  const handleDrop = (event) => {
-    event.preventDefault()
-    const file = event.dataTransfer.files?.[0]
-    if (file) setEegFile(file)
-  }
-
-  const handleDragOver = (event) => {
-    event.preventDefault()
+    const si = strategyIndexAfter[awaiting]
+    const strat = si != null ? COPING_STRATEGIES[si] : null
+    const nextKey = NEXT[awaiting]
+    const nextMsgs = []
+    if (strat) {
+      nextMsgs.push({
+        id: `strategy-${awaiting}-${si}`,
+        from: 'bot',
+        variant: 'strategy',
+        text: strat,
+      })
+    }
+    if (nextKey && QUESTIONS[nextKey]) {
+      nextMsgs.push({
+        id: `q-${nextKey}`,
+        from: 'bot',
+        text: QUESTIONS[nextKey],
+      })
+    }
+    setMessages((prev) => [...prev, ...nextMsgs])
+    setAwaiting(nextKey || 'stress')
   }
 
   return (
@@ -165,7 +237,11 @@ export function ChatbotView() {
           <div className="chat-avatar">N</div>
           <div className="chat-header-text">
             <span className="chat-title">Neurobot</span>
-            <span className="chat-subtitle">Emotion check‑in (placeholder)</span>
+            <span className="chat-subtitle">
+              {chatPhase === 'rag'
+                ? 'OpenAI RAG (NeuroBot) · after your check-in'
+                : 'Muse · LSL · check-in while EEG streams'}
+            </span>
           </div>
         </div>
 
@@ -175,7 +251,9 @@ export function ChatbotView() {
               key={m.id}
               className={`chat-row ${m.from === 'user' ? 'chat-row-user' : 'chat-row-bot'}`}
             >
-              <div className={`bubble bubble-${m.from}`}>
+              <div
+                className={`bubble bubble-${m.from} ${m.variant === 'strategy' ? 'bubble-strategy' : ''} ${m.variant === 'rag' ? 'bubble-rag' : ''} ${m.variant === 'error' ? 'bubble-error' : ''}`}
+              >
                 {m.text}
               </div>
             </div>
@@ -187,20 +265,22 @@ export function ChatbotView() {
             type="text"
             className="chat-input"
             placeholder={
-              finished
-                ? 'You’ve reached the end of this check‑in.'
-                : 'Type your response and hit Enter...'
+              chatPhase === 'rag'
+                ? 'Ask NeuroBot (answers from your knowledge base)…'
+                : finished
+                  ? 'Conversation ended — reset below to start again.'
+                  : 'Type your reply…'
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={finished}
+            disabled={ragLoading || (finished && chatPhase !== 'rag')}
           />
           <button
             type="submit"
             className="btn btn-primary chat-send"
-            disabled={!input.trim() || finished}
+            disabled={!input.trim() || ragLoading || (finished && chatPhase !== 'rag')}
           >
-            Send
+            {ragLoading ? '…' : 'Send'}
           </button>
         </form>
       </section>
@@ -208,67 +288,128 @@ export function ChatbotView() {
       <section className="side-panel">
         {summary && (
           <section className="summary-card">
-            <h3>Your snapshot (fake for now)</h3>
+            <h3>Session snapshot</h3>
             <p className="summary-main">
               {summary.moodScore != null ? (
                 <>
-                  Based on this quick chat, your mood lands around{' '}
-                  <span className="summary-highlight">{summary.moodScore}/10</span>, which points to{' '}
-                  <span className="summary-highlight">{summary.wellbeingLevel}</span>.
+                  Mood you reported:{' '}
+                  <span className="summary-highlight">{summary.moodScore}/10</span>
+                  {summary.emotionWord ? (
+                    <>
+                      {' '}
+                      · word: <span className="summary-highlight">“{summary.emotionWord}”</span>
+                    </>
+                  ) : null}
                 </>
               ) : (
-                <>Thanks for walking through this with me — I’ve got a rough picture of where you’re at.</>
+                <>Thanks for completing the check-in.</>
               )}
             </p>
-            {summary.emotionWord && (
-              <p className="summary-secondary">
-                The emotion word you used was{' '}
-                <span className="summary-highlight">“{summary.emotionWord}”</span>.
-              </p>
-            )}
             <p className="summary-footnote">
-              Hook this up to your sentiment models or EEG pipeline to turn this into a real dashboard.
+              EEG labels below come from your pipeline when a model is loaded on the backend (
+              <code>EEG_MODEL_PATH</code>).
             </p>
             <button type="button" className="btn btn-ghost summary-reset" onClick={handleReset}>
-              Start a new check‑in
+              Start a new check-in
             </button>
           </section>
         )}
 
-        <section
-          className={`eeg-card ${eegFile ? 'eeg-card-has-file' : ''}`}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-        >
-          <h3>EEG upload (for your pipeline)</h3>
+        <section className={`eeg-card eeg-live ${supportPath ? 'eeg-card-support-path' : ''}`}>
+          <h3>Live EEG (Muse → LSL)</h3>
           <p className="eeg-desc">
-            Drop a file here or browse to select one. This doesn’t process anything yet – it’s a
-            front‑end hook so you can wire in your own EEG analysis.
+            Stream from Muse Lab (or any LSL EEG outlet with type <code>EEG</code>). On a support check-in
+            (mood below 8), we connect automatically so stats stay visible while you talk.
           </p>
-          <label className="eeg-dropzone">
-            <input
-              type="file"
-              className="eeg-input"
-              accept=".edf,.bdf,.csv,.mat,.fif,.txt,.json,application/octet-stream"
-              onChange={handleFileChange}
-            />
-            <span className="eeg-dropzone-text">
-              {eegFile ? (
-                <>
-                  <span className="eeg-file-name">{eegFile.name}</span>
-                </>
-              ) : (
-                <>Drop EEG file or click to choose</>
+          <div className="eeg-actions">
+            {!wsConnected ? (
+              <button type="button" className="btn btn-primary eeg-connect-btn" onClick={connect}>
+                Connect live stream
+              </button>
+            ) : (
+              <button type="button" className="btn btn-ghost eeg-connect-btn" onClick={disconnect}>
+                Disconnect
+              </button>
+            )}
+          </div>
+          <dl className="eeg-stats">
+            <div>
+              <dt>WebSocket</dt>
+              <dd>{wsConnected ? 'connected' : 'disconnected'}</dd>
+            </div>
+            <div>
+              <dt>LSL EEG</dt>
+              <dd>{snapshot?.connected ? 'receiving' : 'not connected'}</dd>
+            </div>
+            <div>
+              <dt>Sample rate</dt>
+              <dd>{snapshot?.sfreq != null ? `${Math.round(snapshot.sfreq)} Hz` : '—'}</dd>
+            </div>
+            <div>
+              <dt>Channels</dt>
+              <dd>{snapshot?.channels ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Buffer</dt>
+              <dd>{snapshot?.samples_in_buffer ?? 0} samples</dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd>{snapshot?.model_loaded ? 'loaded' : 'not loaded'}</dd>
+            </div>
+          </dl>
+          {supportPath && (
+            <>
+              <EegMuseLslStats museLsl={snapshot?.muse_lsl} />
+              <div className="eeg-viewer-block">
+                <h4 className="eeg-viewer-title">Stream view (in-browser)</h4>
+                <p className="eeg-viewer-desc">
+                  Downsampled traces from the same window as band power — similar spirit to a desktop LSL viewer,
+                  rendered here in the app.
+                </p>
+                <EegWaveform waveform={snapshot?.waveform} />
+              </div>
+            </>
+          )}
+          {snapshot?.emotion?.error && (
+            <p className="eeg-error">
+              <strong>Model error:</strong> {snapshot.emotion.error}
+            </p>
+          )}
+          {snapshot?.emotion?.label && !snapshot?.emotion?.error && (
+            <p className="eeg-emotion">
+              <strong>Emotion (model):</strong> {snapshot.emotion.label}
+              {snapshot.emotion.confidence != null && (
+                <span className="eeg-conf"> ({(snapshot.emotion.confidence * 100).toFixed(0)}%)</span>
               )}
-            </span>
-          </label>
+            </p>
+          )}
+          {snapshot?.goleman?.goleman_state && (
+            <div className="goleman-panel">
+              <p className="eeg-goleman">
+                <strong>Goleman mapping:</strong> {snapshot.goleman.goleman_state.replace(/_/g, ' ')}
+                {golemanSide?.emotion ? (
+                  <>
+                    {' '}
+                    <span className="eeg-conf">(model: {golemanSide.emotion})</span>
+                  </>
+                ) : null}
+              </p>
+              {golemanSide?.lines?.map((block) => (
+                <div key={`${block.kind}-${block.title}`} className="goleman-block">
+                  <span className="goleman-block-title">{block.title}</span>
+                  <p className="goleman-block-text">{block.text}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {snapshot?.error && <p className="eeg-error">{snapshot.error}</p>}
           <p className="eeg-hint">
-            Once your backend is ready, grab this file from the input change handler and send it to
-            your API.
+            Backend: <code>uvicorn backend.main:app --port 8000</code> · optional{' '}
+            <code>EEG_MODEL_PATH</code> to your trained <code>EmotionModel</code> joblib.
           </p>
         </section>
       </section>
     </main>
   )
 }
-

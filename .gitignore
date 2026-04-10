@@ -1,2 +1,17 @@
+<<<<<<< HEAD
+<<<<<<< HEAD
+node_modules
+dist
+.venv
+__pycache__
+*.pyc
+.env
+.DS_Store
+=======
 .env
 .node_modules
+>>>>>>> a9a24470aadde91f25548f65f91e8981972cf23a
+=======
+.env
+.node_modules
+>>>>>>> origin/main
