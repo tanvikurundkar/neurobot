@@ -1,0 +1,49 @@
+:root {
+  /* Blue & grey palette */
+  --blue-deep: #1e3a5f;
+  --blue-mid: #2c5282;
+  --blue-soft: #4a90c2;
+  --blue-light: #7eb8e0;
+  --blue-pale: #e8f2f8;
+  --grey-dark: #2d3748;
+  --grey-mid: #4a5568;
+  --grey-soft: #718096;
+  --grey-light: #a0aec0;
+  --grey-pale: #edf2f7;
+  --white: #fafbfc;
+  --shadow: rgba(30, 58, 95, 0.12);
+  --font-heading: 'Bree Serif', Georgia, serif;
+  --font-body: Verdana, Geneva, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  background: linear-gradient(160deg, var(--grey-pale) 0%, var(--blue-pale) 50%, var(--grey-pale) 100%);
+  color: var(--grey-dark);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-heading);
+  color: var(--blue-deep);
+  margin: 0;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+input, textarea {
+  font-family: var(--font-body);
+}
