@@ -1,205 +1,110 @@
- 
 import os
+import re
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-import mne
-from mne_bids import BIDSPath, read_raw_bids
-from mne.preprocessing import ICA
- 
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, classification_report
 
-BIDS_ROOT = "./data/ds004368"  ## PLACEHOLDER DATA TO CLEAN - MATCH TO MUSE DATA FORMAT
-OUTPUT_DIR = "./data/cleaned"
-TASK = "rest"
- 
-# filter stuff
-LOW = 1.0
-HIGH = 40.0
-NOTCH = 60.0  # powerline noise in US is 60hz
- 
-# ica settings
-N_COMPONENTS = 20
- 
-# epoch window
-TMIN = 0.0
-TMAX = 1.0
- 
- 
-# loads the raw eeg file for a subject
-def load_subject(subject):
-    print("loading subject: " + subject)
- 
-    path = BIDSPath(
-        subject=subject,
-        task=TASK,
-        datatype="eeg",
-        root=BIDS_ROOT
-    )
- 
-    raw = read_raw_bids(bids_path=path, verbose=False)
-    raw.load_data()
- 
-    # just printing some info to make sure it loaded right
-    print("num channels: " + str(len(raw.ch_names)))
-    print("duration: " + str(raw.times[-1]) + " seconds")
-    print("sample rate: " + str(raw.info['sfreq']) + " Hz")
- 
-    return raw
- 
- 
-# apply bandpass and notch filter to remove noise
-def filter_data(raw):
-    print("filtering...")
- 
-    # bandpass filter - removes anything below 1hz and above 40hz
-    raw.filter(l_freq=LOW, h_freq=HIGH, verbose=False)
- 
-    # notch filter to remove 60hz powerline noise
-    raw.notch_filter(freqs=NOTCH, verbose=False)
- 
-    return raw
- 
- 
-# set average reference
-def set_ref(raw):
-    print("setting reference...")
-    raw.set_eeg_reference("average", projection=True)
-    raw.apply_proj()
-    return raw
- 
- 
-# try to find bad channels automatically
-def find_bad_channels(raw):
-    print("checking for bad channels...")
- 
-    data = raw.get_data(picks="eeg")
- 
-    # flat channels have basically no signal
-    flat = np.std(data, axis=1) < 0.5e-6
-    flat_list = [raw.ch_names[i] for i in range(len(flat)) if flat[i]]
- 
-    # noisy channels have way more variance than normal
-    stds = np.std(data, axis=1)
-    noisy = stds > 5 * np.median(stds)
-    noisy_list = [raw.ch_names[i] for i in range(len(noisy)) if noisy[i]]
- 
-    bad = list(set(flat_list + noisy_list))
-    raw.info["bads"] = bad
- 
-    print("bad channels found: " + str(bad))
- 
-    # interpolate them so we dont lose the data
-    if len(bad) > 0:
-        raw.interpolate_bads(reset_bads=True)
-        print("interpolated bad channels")
- 
-    return raw
- 
- 
-# run ICA to remove eye blinks and muscle artifacts
-def run_ica(raw):
-    print("running ICA... (this takes a while)")
- 
-    # need to highpass filter before ICA
-    raw_copy = raw.copy().filter(1.0, None, verbose=False)
- 
-    ica = ICA(n_components=N_COMPONENTS, random_state=42, max_iter="auto")
-    ica.fit(raw_copy, picks="eeg", verbose=False)
- 
-    # try to find eye blink components automatically
-    eog_idx = []
-    try:
-        eog_idx, scores = ica.find_bads_eog(raw, verbose=False)
-        print("eye artifact components: " + str(eog_idx))
-    except:
-        print("no channel found, skipping")
- 
-    ica.exclude = eog_idx
-    ica.apply(raw)
-    print("removed " + str(len(eog_idx)) + " components")
- 
-    return raw
- 
- 
-# split data into epochs
-def make_epochs(raw):
-    print("making epochs...")
- 
-    events, event_id = mne.events_from_annotations(raw, verbose=False)
- 
-    # if no events found just split into 2 second chunks
-    if len(events) == 0:
-        print("no events found, using fixed length epochs")
-        epochs = mne.make_fixed_length_epochs(raw, duration=2.0, preload=True, verbose=False)
-    else:
-        print("events: " + str(event_id))
-        epochs = mne.Epochs(
-            raw,
-            events=events,
-            event_id=event_id,
-            tmin=TMIN,
-            tmax=TMAX,
-            baseline=(None, 0),
-            reject=dict(eeg=150e-6),  # reject epochs with amplitude over 150 microvolts
-            preload=True,
-            verbose=False
-        )
- 
-    print("kept " + str(len(epochs)) + " epochs")
-    return epochs
- 
- 
-# save the cleaned data
-def save_data(epochs, subject):
-    out_dir = os.path.join(OUTPUT_DIR, "sub-" + subject)
-    os.makedirs(out_dir, exist_ok=True)
- 
-    filename = "sub-" + subject + "_cleaned-epo.fif"
-    out_path = os.path.join(out_dir, filename)
-    epochs.save(out_path, overwrite=True)
-    print("saved to: " + out_path)
- 
- 
-# save a plot of the power spectrum so we can check it looks right
-def save_plot(epochs, subject):
-    fig_dir = os.path.join(OUTPUT_DIR, "sub-" + subject + "_figures")
-    os.makedirs(fig_dir, exist_ok=True)
- 
-    fig = epochs.plot_psd(fmin=1, fmax=40, show=False)
-    fig_path = os.path.join(fig_dir, "sub-" + subject + "_psd.png")
-    fig.savefig(fig_path)
+
+CSV_PATH = "./data/emotions.csv"
+OUTPUT_DIR = "./data/emotions_out"
+LABEL_COL = "label"
+SEED = 42
+
+
+# load and tidy the csv
+def load_data(path):
+    df = pd.read_csv(path)
+    # first header comes in as "# mean_0_a" - strip the "# "
+    df.columns = [c.lstrip("# ").strip() for c in df.columns]
+    y = df[LABEL_COL].values
+    X = df.drop(columns=[LABEL_COL])
+    print("rows: " + str(X.shape[0]) + ", features: " + str(X.shape[1]))
+    print(pd.Series(y).value_counts().to_string())
+    return X, y
+
+
+# group features by type, e.g. fft_12_a -> fft_#_a
+def feature_group(name):
+    return re.sub(r"\d+", "#", name)
+
+
+# 2d maps of the feature space colored by emotion label
+def plot_maps(X_scaled, y, out_dir):
+    pca = PCA(n_components=2, random_state=SEED)
+    p = pca.fit_transform(X_scaled)
+    print("PCA variance explained: " + str(np.round(pca.explained_variance_ratio_, 3)))
+
+    # reduce first so t-sne is fast and less noisy
+    reduced = PCA(n_components=50, random_state=SEED).fit_transform(X_scaled)
+    t = TSNE(n_components=2, perplexity=30, random_state=SEED).fit_transform(reduced)
+
+    colors = {"NEGATIVE": "tab:red", "NEUTRAL": "tab:gray", "POSITIVE": "tab:green"}
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
+    for ax, emb, title in [(axes[0], p, "PCA"), (axes[1], t, "t-SNE")]:
+        for lab, col in colors.items():
+            m = y == lab
+            ax.scatter(emb[m, 0], emb[m, 1], s=8, alpha=0.6, c=col, label=lab)
+        ax.set_title(title + " of EEG features")
+    axes[0].legend()
+    path = os.path.join(out_dir, "emotion_map.png")
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print("saved " + path)
+
+
+# which feature types matter most (importances summed per group)
+def plot_group_importance(X, y, out_dir):
+    rf = RandomForestClassifier(n_estimators=300, random_state=SEED, n_jobs=-1)
+    rf.fit(X, y)
+    imp = pd.Series(rf.feature_importances_, index=X.columns)
+    groups = imp.groupby([feature_group(c) for c in imp.index]).sum()
+    top = groups.sort_values(ascending=False).head(15)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    top[::-1].plot.barh(ax=ax)
+    ax.set_xlabel("summed importance")
+    ax.set_title("top feature groups")
+    path = os.path.join(out_dir, "feature_group_importance.png")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print("saved " + path)
+
+
+# cross-validated classification + confusion matrix
+# NOTE: rows are shuffled and likely overlapping windows from the same recording,
+# so random folds can leak and look better than they would on a new person/session
+def run_classifier(X, y, out_dir):
+    rf = RandomForestClassifier(n_estimators=300, random_state=SEED, n_jobs=-1)
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+    pred = cross_val_predict(rf, X, y, cv=cv)
+
+    print(classification_report(y, pred))
+    labels = ["NEGATIVE", "NEUTRAL", "POSITIVE"]
+    cm = confusion_matrix(y, pred, labels=labels)
+    disp = ConfusionMatrixDisplay(cm, display_labels=labels)
+    disp.plot(cmap="Blues")
+    path = os.path.join(out_dir, "confusion_matrix.png")
+    plt.savefig(path, dpi=150)
     plt.close()
-    print("saved plot to: " + fig_path)
- 
- 
-# run everything for one subject
-def process_one_subject(subject):
-    print("\n--- processing sub-" + subject + " ---")
-    raw = load_subject(subject)
-    raw = filter_data(raw)
-    raw = set_ref(raw)
-    raw = find_bad_channels(raw)
-    raw = run_ica(raw)
-    epochs = make_epochs(raw)
-    save_data(epochs, subject)
-    save_plot(epochs, subject)
-    print("done with sub-" + subject)
- 
- 
-# get list of all subjects in the dataset folder
-def get_subjects():
-    subjects = []
-    for folder in os.listdir(BIDS_ROOT):
-        if folder.startswith("sub-"):
-            subjects.append(folder.replace("sub-", ""))
-    return sorted(subjects)
- 
- 
+    print("saved " + path)
+
+
 # main
 if __name__ == "__main__":
-    subjects = get_subjects()
-    print("found " + str(len(subjects)) + " subjects")
- 
-    for sub in subjects:
-        process_one_subject(sub)
- 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    X, y = load_data(CSV_PATH)
+    X_scaled = StandardScaler().fit_transform(X)
+
+    plot_maps(X_scaled, y, OUTPUT_DIR)
+    plot_group_importance(X, y, OUTPUT_DIR)
+    run_classifier(X, y, OUTPUT_DIR)
+
     print("\nall done! files saved to: " + OUTPUT_DIR)
