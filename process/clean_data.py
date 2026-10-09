@@ -7,7 +7,7 @@ from mne_bids import BIDSPath, read_raw_bids
 from mne.preprocessing import ICA
  
 
-BIDS_ROOT = "./data/ds004368"
+BIDS_ROOT = "./data/ds004368"  ## PLACEHOLDER DATA TO CLEAN - MATCH TO MUSE DATA FORMAT
 OUTPUT_DIR = "./data/cleaned"
 TASK = "rest"
  
